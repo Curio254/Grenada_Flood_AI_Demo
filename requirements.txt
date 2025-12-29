@@ -1,0 +1,6 @@
+earthengine-api
+rasterio
+numpy
+folium
+matplotlib
+requests
