@@ -10,9 +10,9 @@ import rasterio
 import numpy as np
 import folium
 from rasterio.warp import reproject, Resampling
+import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 from branca.colormap import linear
-from folium.plugins import Fullscreen, MiniMap
 
 # -----------------------------
 # CONFIG
@@ -22,13 +22,18 @@ PROJECT_ID = "aerobic-amphora-482118-j4"
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 OUT_DIR = os.path.join(BASE_DIR, "outputs")
 TIFF_DIR = os.path.join(OUT_DIR, "tiffs")
+PNG_DIR = os.path.join(OUT_DIR, "maps")
 
 os.makedirs(TIFF_DIR, exist_ok=True)
+os.makedirs(PNG_DIR, exist_ok=True)
 
 NDWI_TIF = os.path.join(TIFF_DIR, "ndwi.tif")
 DEM_TIF = os.path.join(TIFF_DIR, "dem.tif")
 POP_TIF = os.path.join(TIFF_DIR, "population.tif")
 RISK_TIF = os.path.join(TIFF_DIR, "flood_risk.tif")
+
+NDWI_PNG = os.path.join(PNG_DIR, "ndwi.png")
+RISK_PNG = os.path.join(PNG_DIR, "flood_risk.png")
 
 # -----------------------------
 # INITIALIZE EARTH ENGINE
@@ -117,7 +122,7 @@ dem_arr = align_to_ref(DEM_TIF, ref_meta)
 pop_arr = align_to_ref(POP_TIF, ref_meta)
 
 # -----------------------------
-# FLOOD RISK INDEX (SOVI-style)
+# FLOOD RISK INDEX
 # -----------------------------
 ndwi_norm = np.clip((ndwi_arr + 1) / 2, 0, 1)
 dem_norm = 1 - np.clip((dem_arr - np.nanmin(dem_arr)) / (np.nanmax(dem_arr) - np.nanmin(dem_arr) + 1e-6), 0, 1)
@@ -134,58 +139,50 @@ with rasterio.open(RISK_TIF, "w", **ref_meta) as dst:
 print("✅ Flood risk GeoTIFF created")
 
 # -----------------------------
-# HELPER: CONVERT ARRAY TO COLOR
+# HELPER: CONVERT ARRAY TO PNG
 # -----------------------------
-def array_to_colormap(arr, cmap_name="viridis"):
+def save_array_as_png(arr, png_path, cmap_name="viridis"):
+    arr_norm = (arr - np.nanmin(arr)) / (np.nanmax(arr) - np.nanmin(arr) + 1e-6)
     cmap = cm.get_cmap(cmap_name)
-    normed = np.clip(arr, 0, 1)
-    rgba = cmap(normed)
-    rgb_uint8 = (rgba[:, :, :3] * 255).astype(np.uint8)
-    return rgb_uint8
+    plt.imsave(png_path, arr_norm, cmap=cmap)
+    print(f"✅ Saved PNG: {png_path}")
+
+save_array_as_png(ndwi_arr, NDWI_PNG, cmap_name="Blues")
+save_array_as_png(flood_risk, RISK_PNG, cmap_name="Reds")
 
 # -----------------------------
-# CREATE FOLIUM MAP WITH INTERACTIVITY
+# CREATE FOLIUM MAP
 # -----------------------------
 m = folium.Map(
-    location=[12.15, -61.65], 
-    zoom_start=10, 
-    control_scale=True, 
-    zoom_control=True, 
-    scrollWheelZoom=True, 
+    location=[12.15, -61.65],
+    zoom_start=10,
+    control_scale=True,
+    zoom_control=True,
+    scrollWheelZoom=True,
     dragging=True
 )
 
-# Add plugins
-Fullscreen(position='topright').add_to(m)
-MiniMap(toggle_display=True).add_to(m)
-
-# -----------------------------
-# ADD RASTER LAYERS
-# -----------------------------
-def add_raster_colormap(tif_path, name, cmap_name="viridis"):
-    with rasterio.open(tif_path) as src:
-        arr = src.read(1)
+def add_png_overlay(png_path, name):
+    # Use bounds from the original reference raster
+    with rasterio.open(NDWI_TIF) as src:
         bounds = src.bounds
-        arr_norm = (arr - np.nanmin(arr)) / (np.nanmax(arr) - np.nanmin(arr) + 1e-6)
-        img_rgb = array_to_colormap(arr_norm, cmap_name=cmap_name)
-
     overlay = folium.raster_layers.ImageOverlay(
-        image=img_rgb,
+        image=png_path,
         bounds=[[bounds.bottom, bounds.left], [bounds.top, bounds.right]],
         opacity=0.7,
         name=name
     )
     overlay.add_to(m)
 
-add_raster_colormap(NDWI_TIF, "NDWI", cmap_name="Blues")
-add_raster_colormap(RISK_TIF, "Flood Risk Index", cmap_name="Reds")
+# Add NDWI and Flood Risk overlays
+add_png_overlay(NDWI_PNG, "NDWI")
+add_png_overlay(RISK_PNG, "Flood Risk Index")
 
-# Add layer control for toggling
+# -----------------------------
+# ADD LAYER CONTROL & LEGENDS
+# -----------------------------
 folium.LayerControl().add_to(m)
 
-# -----------------------------
-# ADD INTERACTIVE LEGENDS
-# -----------------------------
 ndwi_colormap = linear.Blues_09.scale(0, 1)
 ndwi_colormap.caption = 'NDWI'
 ndwi_colormap.add_to(m)
@@ -195,7 +192,7 @@ flood_colormap.caption = 'Flood Risk'
 flood_colormap.add_to(m)
 
 # -----------------------------
-# SAVE MAP
+# SAVE HTML
 # -----------------------------
 MAP_HTML = os.path.join(OUT_DIR, "flood_sovi_map.html")
 m.save(MAP_HTML)
