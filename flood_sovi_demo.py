@@ -12,6 +12,7 @@ import folium
 from rasterio.warp import reproject, Resampling
 import matplotlib.cm as cm
 from branca.colormap import linear
+from folium.plugins import Fullscreen, MiniMap
 
 # -----------------------------
 # CONFIG
@@ -52,9 +53,6 @@ aoi = ee.Geometry.Polygon([
 # SAFE DOWNLOAD FUNCTION
 # -----------------------------
 def ee_download(img, out_path, scale):
-    """
-    Download an Earth Engine image as a proper GeoTIFF.
-    """
     url = img.getDownloadURL({
         "scale": scale,
         "crs": "EPSG:4326",
@@ -79,9 +77,7 @@ s2 = (
     .median()
 )
 ndwi = s2.normalizedDifference(["B3", "B8"]).rename("NDWI").clip(aoi)
-
 dem = ee.Image("USGS/SRTMGL1_003").clip(aoi)
-
 population = (
     ee.ImageCollection("WorldPop/GP/100m/pop")
     .filterDate("2020-01-01", "2020-12-31")
@@ -92,7 +88,7 @@ population = (
 # -----------------------------
 # DOWNLOAD DATA (SAFE SCALES)
 # -----------------------------
-ee_download(ndwi, NDWI_TIF, scale=60)   # NDWI scale safe for download
+ee_download(ndwi, NDWI_TIF, scale=60)
 ee_download(dem, DEM_TIF, scale=30)
 ee_download(population, POP_TIF, scale=100)
 
@@ -153,12 +149,19 @@ def array_to_colormap(arr, cmap_name="viridis"):
 m = folium.Map(
     location=[12.15, -61.65], 
     zoom_start=10, 
-    control_scale=True,    # Adds scale
-    zoom_control=True,     # Zoom buttons
-    scrollWheelZoom=True,  # Scroll wheel zoom
-    dragging=True          # Enable panning
+    control_scale=True, 
+    zoom_control=True, 
+    scrollWheelZoom=True, 
+    dragging=True
 )
 
+# Add plugins
+Fullscreen(position='topright').add_to(m)
+MiniMap(toggle_display=True).add_to(m)
+
+# -----------------------------
+# ADD RASTER LAYERS
+# -----------------------------
 def add_raster_colormap(tif_path, name, cmap_name="viridis"):
     with rasterio.open(tif_path) as src:
         arr = src.read(1)
@@ -174,7 +177,6 @@ def add_raster_colormap(tif_path, name, cmap_name="viridis"):
     )
     overlay.add_to(m)
 
-# Add NDWI and Flood Risk layers
 add_raster_colormap(NDWI_TIF, "NDWI", cmap_name="Blues")
 add_raster_colormap(RISK_TIF, "Flood Risk Index", cmap_name="Reds")
 
@@ -182,7 +184,7 @@ add_raster_colormap(RISK_TIF, "Flood Risk Index", cmap_name="Reds")
 folium.LayerControl().add_to(m)
 
 # -----------------------------
-# ADD LEGENDS
+# ADD INTERACTIVE LEGENDS
 # -----------------------------
 ndwi_colormap = linear.Blues_09.scale(0, 1)
 ndwi_colormap.caption = 'NDWI'
